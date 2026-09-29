@@ -203,9 +203,20 @@ class PostProcessorTest {
     }
 
     @Test
+    fun buildRequestBodyAutoOmitsTemperatureForGpt6FamilyByDefault() {
+        val body = PostProcessor.buildRequestBody("raw text", "system prompt", "gpt-6-luna")
+        assertFalse(body.has("temperature"))
+        assertEquals("gpt-6-luna", body.getString("model"))
+        assertFalse(body.getBoolean("stream"))
+        assertEquals("system prompt", body.getJSONArray("messages").getJSONObject(0).getString("content"))
+        assertEquals("raw text", body.getJSONArray("messages").getJSONObject(1).getString("content"))
+    }
+
+    @Test
     fun rejectsTemperatureCoversReasoningFamiliesButNotCurrentDefaults() {
         assertTrue(PostProcessor.rejectsTemperature("gpt-5.6-luna"))
         assertTrue(PostProcessor.rejectsTemperature("gpt-5.6-terra"))
+        assertTrue(PostProcessor.rejectsTemperature("gpt-6-luna"))
         assertTrue(PostProcessor.rejectsTemperature("o1-mini"))
         assertFalse(PostProcessor.rejectsTemperature("gpt-5.4-mini"))
         assertFalse(PostProcessor.rejectsTemperature("gpt-5.4-nano"))
