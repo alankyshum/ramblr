@@ -22,7 +22,7 @@ object PostProcessor {
      *  fails loudly at call time with a clear "Unsupported value" error needing a one-line
      *  addition, which is safer than a false positive silently omitting temperature from a model
      *  that wanted it. */
-    private val TEMPERATURE_REJECTING_MODEL_PREFIXES = listOf("o1", "o3", "o4", "gpt-5.6")
+    private val TEMPERATURE_REJECTING_MODEL_PREFIXES = listOf("o1", "o3", "o4", "gpt-5.6", "gpt-6")
 
     /** True when [model] is in a family that rejects `temperature` (#106), so request builders
      *  must omit the field. Public so the eval harness and any future call path can share the
@@ -266,15 +266,16 @@ explanations, headers, or comments about your edits.
      * SSE-parsing code path.
      */
     /**
-     * [omitTemperature] (#106): OpenAI's GPT-5.6 family (confirmed live for gpt-5.6-terra) and
-     * the older o1/o3/o4 reasoning-model families reject a non-default `temperature` value
+     * [omitTemperature] (#106): OpenAI's GPT-5.6 and GPT-6 families, and the older o1/o3/o4
+     * reasoning-model families reject a non-default `temperature` value
      * outright -- "Unsupported value: 'temperature' does not support 0 with this model. Only
      * the default (1) value is supported." -- unlike gpt-5.4-nano/gpt-5.4-mini (the previous
      * shipped defaults), which accept temperature=0.0 fine. Defaults to
      * [rejectsTemperature] of the effective model, so every call site -- including
      * [CleanupWaterfallExecutor]'s production path -- automatically omits temperature for a
      * temperature-rejecting family now that one (gpt-5.6-luna, 2026-08-25) is a shipped
-     * default. Pass an explicit value only to override the detection.
+     * default. GPT-6-luna also requires temperature to be omitted unless reasoning is disabled.
+     * Pass an explicit value only to override the detection.
      */
     fun buildRequestBody(
         text: String,
