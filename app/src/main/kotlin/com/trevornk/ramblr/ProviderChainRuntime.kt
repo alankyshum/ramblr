@@ -2,9 +2,8 @@ package com.trevornk.ramblr
 
 /**
  * Runtime adapter from Phase 1's unified [ProviderChain] model into the legacy cleanup executor
- * shape. This deliberately keeps [CleanupWaterfallExecutor] itself unchanged for Phase 2: its
- * fail-fast grouping, cursor resume, and local-deadline behavior are already heavily tested and
- * are the high-risk part of Trevor's live dictation path.
+ * shape. The executor continues to own fail-fast grouping, cursor resume, and local-deadline
+ * behavior; provider capability handling remains inside its existing HTTP transport path.
  */
 object ProviderChainRuntime {
     /** Transcription provider-chain kinds modeled as capable but not implemented by a live HTTP

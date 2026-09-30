@@ -4,6 +4,9 @@ import com.trevornk.ramblr.AnthropicCleanupProvider
 import com.trevornk.ramblr.GeminiCleanupProvider
 import com.trevornk.ramblr.NetworkClients
 import com.trevornk.ramblr.PostProcessor
+import com.trevornk.ramblr.ProviderKind
+import com.trevornk.ramblr.TemperatureRejectionClassifier
+import com.trevornk.ramblr.TemperatureCapabilityStore
 import com.trevornk.ramblr.VocabularyTerms
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
@@ -66,15 +69,37 @@ private enum class Provider(val label: String, val apiKeyEnv: String, val models
     GEMINI("gemini", "GEMINI_API_KEY", "GEMINI_EVAL_MODELS", listOf("gemini-2.5-flash-lite", "gemini-2.5-flash")),
 }
 
-/** Delegates to the single production list in [PostProcessor.rejectsTemperature] (#106/#194) --
- *  this harness previously carried its own copy, which is exactly the drift the production
- *  helper was extracted to prevent. */
-private fun openAiRejectsTemperature(model: String): Boolean =
-    PostProcessor.rejectsTemperature(model)
+/** Evaluation preflight capability is held only in this process; no user cache or Android state. */
+private val evalTemperatureSupport = java.util.concurrent.ConcurrentHashMap<String, TemperatureCapabilityStore.State>()
+
+private fun openAiRejectsTemperature(apiKey: String, model: String): Boolean {
+    val identity = TemperatureCapabilityStore.identity(
+        ProviderKind.OPENAI, PostProcessor.ENDPOINT_URL,
+        mapOf("Authorization" to "Bearer $apiKey"), model, "", "stream=false", 0.0,
+    )
+    return evalTemperatureSupport.computeIfAbsent(identity.digest) {
+        val probe = PostProcessor.buildRequestBody("Reply OK", "Reply OK", model)
+            .toString().toRequestBody("application/json".toMediaType())
+        val request = Request.Builder().url(PostProcessor.ENDPOINT_URL)
+            .header("Authorization", "Bearer $apiKey").post(probe).build()
+        try {
+            val response = NetworkClients.shared.newBuilder()
+                .callTimeout(7, java.util.concurrent.TimeUnit.SECONDS)
+                .build().newCall(request).execute()
+            val body = response.body?.string().orEmpty()
+            response.close()
+            when {
+                TemperatureRejectionClassifier.isTemperatureRejection(body, response.code) -> TemperatureCapabilityStore.State.UNSUPPORTED
+                response.isSuccessful && !PostProcessor.parseResponse(body).text.isNullOrBlank() -> TemperatureCapabilityStore.State.SUPPORTED
+                else -> TemperatureCapabilityStore.State.UNKNOWN
+            }
+        } catch (_: Exception) { TemperatureCapabilityStore.State.UNKNOWN }
+    } == TemperatureCapabilityStore.State.UNSUPPORTED
+}
 
 /** Calls OpenAI's real `/v1/chat/completions`, reusing [PostProcessor]'s request/response shape. */
 private fun callOpenAi(apiKey: String, model: String, prompt: String, text: String): PostProcessor.Result {
-    val body = PostProcessor.buildRequestBody(text, prompt, model, omitTemperature = openAiRejectsTemperature(model))
+    val body = PostProcessor.buildRequestBody(text, prompt, model, omitTemperature = openAiRejectsTemperature(apiKey, model))
         .toString().toRequestBody("application/json".toMediaType())
     val request = Request.Builder()
         .url(PostProcessor.ENDPOINT_URL)

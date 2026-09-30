@@ -16,20 +16,6 @@ object PostProcessor {
 
     val ENDPOINT_URL = "$DEFAULT_BASE_URL/chat/completions"
 
-    /** OpenAI model families that reject a non-default `temperature` outright (#106) -- see
-     *  [buildRequestBody]'s kdoc for the exact error. An explicit prefix list rather than a broad
-     *  regex (mirrors the eval harness's TEMPERATURE_REJECTING_OPENAI_PREFIXES): a false negative
-     *  fails loudly at call time with a clear "Unsupported value" error needing a one-line
-     *  addition, which is safer than a false positive silently omitting temperature from a model
-     *  that wanted it. */
-    private val TEMPERATURE_REJECTING_MODEL_PREFIXES = listOf("o1", "o3", "o4", "gpt-5.6", "gpt-6")
-
-    /** True when [model] is in a family that rejects `temperature` (#106), so request builders
-     *  must omit the field. Public so the eval harness and any future call path can share the
-     *  single production list instead of drifting copies. */
-    fun rejectsTemperature(model: String): Boolean =
-        TEMPERATURE_REJECTING_MODEL_PREFIXES.any { model.startsWith(it) }
-
     /** Host cleanup requests are actually sent to by default, for use in UI copy. See #23. */
     val DESTINATION_HOST: String = java.net.URI(ENDPOINT_URL).host
 
@@ -265,23 +251,13 @@ explanations, headers, or comments about your edits.
      * the same flat-JSON response shape [parseResponse] expects instead of adding a second
      * SSE-parsing code path.
      */
-    /**
-     * [omitTemperature] (#106): OpenAI's GPT-5.6 and GPT-6 families, and the older o1/o3/o4
-     * reasoning-model families reject a non-default `temperature` value
-     * outright -- "Unsupported value: 'temperature' does not support 0 with this model. Only
-     * the default (1) value is supported." -- unlike gpt-5.4-nano/gpt-5.4-mini (the previous
-     * shipped defaults), which accept temperature=0.0 fine. Defaults to
-     * [rejectsTemperature] of the effective model, so every call site -- including
-     * [CleanupWaterfallExecutor]'s production path -- automatically omits temperature for a
-     * temperature-rejecting family now that one (gpt-5.6-luna, 2026-08-25) is a shipped
-     * default. GPT-6-luna also requires temperature to be omitted unless reasoning is disabled.
-     * Pass an explicit value only to override the detection.
-     */
+    /** [omitTemperature] is an explicit wire-shape option; production capability is learned per
+     * endpoint configuration by [TemperatureCapabilityStore]. */
     fun buildRequestBody(
         text: String,
         prompt: String,
         model: String,
-        omitTemperature: Boolean = rejectsTemperature(model.ifBlank { DEFAULT_MODEL }),
+        omitTemperature: Boolean = false,
     ): JSONObject {
         val messages = JSONArray().apply {
             put(JSONObject().apply {
@@ -338,6 +314,7 @@ explanations, headers, or comments about your edits.
         // Optional benchmark/quality-log correlation (GH #100, #102), passed straight through to
         // [CleanupWaterfallExecutor.execute] -- see its own kdoc on these same param names.
         benchmarkContext: android.content.Context? = null,
+        temperatureCacheContext: android.content.Context? = null,
         benchmarkCorrelationId: String? = null,
         // Test seam only, mirroring [CleanupWaterfallExecutor.execute]'s own default: production
         // callers never pass this. Lets a unit test assert that every chain -- including the
@@ -365,6 +342,7 @@ explanations, headers, or comments about your edits.
             localPrompt = localPrompt,
             localVocabulary = localVocabulary,
             benchmarkContext = benchmarkContext,
+            temperatureCacheContext = temperatureCacheContext,
             benchmarkCorrelationId = benchmarkCorrelationId,
             callback = callback,
         )

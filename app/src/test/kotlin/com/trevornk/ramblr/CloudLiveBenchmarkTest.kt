@@ -8,6 +8,8 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.RecordedRequest
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -109,13 +111,21 @@ class CloudLiveBenchmarkTest {
     /** Same batch stub DictationRuntimeTest uses, so a fallback case actually walks the real
      *  batch chain and emits its own transcription line to correlate against. */
     private fun stubBatchProvider(transcript: String) {
-        batchServer.enqueue(MockResponse().setBody(JSONObject().put("text", transcript).toString()))
         val base = batchServer.url("/v1").toString().trimEnd('/')
         ProviderChainStore.save(
             app,
             ProviderChain(listOf(ProviderChainEntry(ProviderKind.OPENAI, "gpt-5.4-mini", baseUrlOverride = base, transcriptionModel = "gpt-transcribe"))),
         )
         ProviderCredentialStore.setLegacyByKind(app, ProviderKind.OPENAI, "test-batch-key")
+        batchServer.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when {
+                request.path?.contains("/audio/transcriptions") == true ->
+                    MockResponse().setBody(JSONObject().put("text", transcript).toString())
+                request.body.readUtf8().contains("Reply OK") ->
+                    MockResponse().setBody("""{"choices":[{"message":{"content":"OK"}}]}""")
+                else -> MockResponse().setBody("""{"choices":[{"message":{"content":"cleanup"}}]}""")
+            }
+        }
         app.getSharedPreferences("ramblr", Context.MODE_PRIVATE).edit().putBoolean("use_local", false).apply()
         PostProcessingToggle.setEnabled(app, false)
     }

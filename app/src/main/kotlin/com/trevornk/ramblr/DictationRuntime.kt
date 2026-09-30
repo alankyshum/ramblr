@@ -1711,6 +1711,7 @@ class DictationRuntime internal constructor(
                     // #182 option 2: local cleanup applies the same terms as a deterministic
                     // post-pass over its output instead of in its prompt (which broke LFM2.5).
                     localVocabulary = vocabulary,
+                    temperatureCacheContext = context.applicationContext,
                     benchmarkContext = context.takeIf { listener.allowsTranscriptRetention() },
                     benchmarkCorrelationId = correlationIdFor(token),
                 ) { result ->
@@ -1742,6 +1743,9 @@ class DictationRuntime internal constructor(
                             listener.deliverText(finalizeForDelivery(text), rawText = null, paidFallbackGroup = null, cleanupError = reason, feedbackDurationMs = 4000)
                         }
                         resetToIdle(lease)
+                    }
+                }
+            }
                     }
                 }
             }

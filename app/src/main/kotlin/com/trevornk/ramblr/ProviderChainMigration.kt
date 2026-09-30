@@ -146,7 +146,7 @@ object ProviderChainMigration {
         val currentChain = ProviderChainStore.load(context)
         val migratedChain = migrate(currentChain)
         if (migratedChain != currentChain) {
-            ProviderChainStore.save(context, migratedChain)
+            ProviderChainStore.saveWithoutTemperatureProbe(context, migratedChain)
         }
         prefs.edit().putInt(KEY_MIGRATION_VERSION, MIGRATION_VERSION).apply()
     }

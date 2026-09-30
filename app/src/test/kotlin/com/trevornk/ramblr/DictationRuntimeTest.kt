@@ -7,6 +7,8 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.RecordedRequest
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -990,13 +992,21 @@ class DictationRuntimeTest {
     /** Points the batch pipeline at a MockWebServer returning [transcript], so the fallback's
      *  handover is proven by a real delivery instead of an empty-delivery tautology. */
     private fun stubBatchProvider(transcript: String) {
-        batchServer.enqueue(MockResponse().setBody(JSONObject().put("text", transcript).toString()))
         val base = batchServer.url("/v1").toString().trimEnd('/')
         ProviderChainStore.save(
             app,
             ProviderChain(listOf(ProviderChainEntry(ProviderKind.OPENAI, "gpt-5.4-mini", baseUrlOverride = base, transcriptionModel = "gpt-transcribe"))),
         )
         ProviderCredentialStore.setLegacyByKind(app, ProviderKind.OPENAI, "test-batch-key")
+        batchServer.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when {
+                request.path?.contains("/audio/transcriptions") == true ->
+                    MockResponse().setBody(JSONObject().put("text", transcript).toString())
+                request.body.readUtf8().contains("Reply OK") ->
+                    MockResponse().setBody("""{"choices":[{"message":{"content":"OK"}}]}""")
+                else -> MockResponse().setBody("""{"choices":[{"message":{"content":"cleanup"}}]}""")
+            }
+        }
         app.getSharedPreferences("ramblr", android.content.Context.MODE_PRIVATE).edit()
             .putBoolean("use_local", false).apply()
         PostProcessingToggle.setEnabled(app, false)
@@ -1008,6 +1018,36 @@ class DictationRuntimeTest {
             idleMainLooper(); Thread.sleep(10)
         }
         assertEquals(RecordingStateMachine.State.IDLE, runtime.currentState())
+    }
+
+    @Test
+    fun `saving a cloud config sends only a synthetic probe and persists its capability digest`() {
+        batchServer.enqueue(MockResponse().setBody("""{"choices":[{"message":{"content":"OK"}}]}"""))
+        val base = batchServer.url("/v1").toString().trimEnd('/')
+        val key = "probe-test-secret"
+        val chain = ProviderChain(listOf(ProviderChainEntry(ProviderKind.OPENAI, "probe-model", baseUrlOverride = base)))
+        ProviderChainStore.save(app, chain)
+        ProviderCredentialStore.set(app, ProviderKind.OPENAI, key)
+        shadowOf(Looper.getMainLooper()).idleFor(101, TimeUnit.MILLISECONDS)
+
+        val request = batchServer.takeRequest(5, TimeUnit.SECONDS)
+            ?: throw AssertionError("save-time probe was not sent")
+        val requestBody = request.body.readUtf8()
+        assertTrue(requestBody.contains("Reply OK"))
+        assertFalse(requestBody.contains("transcript"))
+        val identity = TemperatureCapabilityStore.identity(
+            ProviderKind.OPENAI, PostProcessor.endpointUrl(base), mapOf("Authorization" to "Bearer $key"),
+            "probe-model", "", "stream=false", 0.0,
+        )
+        val store = TemperatureCapabilityStore.forContext(app)
+        val deadline = System.currentTimeMillis() + 2_000
+        while (System.currentTimeMillis() < deadline && store.state(identity) == TemperatureCapabilityStore.State.UNKNOWN) Thread.sleep(10)
+        assertEquals(TemperatureCapabilityStore.State.SUPPORTED, store.state(identity))
+        val persisted = app.getSharedPreferences("ramblr", android.content.Context.MODE_PRIVATE)
+            .getString("temperature_capabilities", "").orEmpty()
+        assertFalse(persisted.contains(key))
+        assertFalse(persisted.contains("Reply OK"))
+        assertFalse(persisted.contains(base))
     }
 
     private class FakeCloudLiveFactory : CloudLiveTranscriptionSessionFactory {

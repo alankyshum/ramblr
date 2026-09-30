@@ -64,6 +64,7 @@ object ProviderCredentialStore {
     fun set(context: Context, entryId: String, value: String) {
         val key = entryPrefKeyFor(entryId) ?: return
         securePrefs(context).edit().putString(key, value).apply()
+        TemperatureCapabilityProbe.schedule(context, kind)
     }
 
     fun set(context: Context, entry: ProviderChainEntry, value: String) = set(context, entry.id, value)
@@ -132,6 +133,7 @@ object ProviderCredentialStore {
     fun clearLegacyByKind(context: Context, kind: ProviderKind) {
         val key = legacyPrefKeyFor(kind) ?: return
         securePrefs(context).edit().remove(key).apply()
+        TemperatureCapabilityProbe.schedule(context, kind)
     }
 
     /** Masking convention: last 4 chars only, e.g. "***cdef". */

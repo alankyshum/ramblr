@@ -179,6 +179,7 @@ class ProcessTextActivity : Activity() {
                     // #182 option 2: local cleanup applies the same terms as a deterministic
                     // post-pass over its output instead of in its prompt (which broke LFM2.5).
                     localVocabulary = vocabulary,
+                    temperatureCacheContext = applicationContext,
                     // Deliberately no benchmarkContext/correlationId: BenchmarkLogger and
                     // QualityLogger exist to correlate a cleanup stage with the transcription
                     // stage of the same dictation (#100/#105), and a selection-menu cleanup has
