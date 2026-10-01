@@ -9,6 +9,8 @@ import okhttp3.mockwebserver.MockWebServer
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -192,5 +194,54 @@ class SnippetRuntimeWiringTest {
         // rawText carries the pre-cleanup transcript for the "tap to undo cleanup" bubble and
         // must stay literal/unexpanded -- see finalizeForDelivery's kdoc.
         assertEquals("please send it to my home address unclean", delivery.rawText)
+    }
+
+    @Test
+    fun `real temperature rejection retries then a recreated runtime uses the per-entry negative cache`() {
+        val base = cleanupServer.url("/v1").toString().trimEnd('/')
+        val entry = ProviderChainEntry(ProviderKind.OPENAI, "gpt-5.4-mini", baseUrlOverride = base, id = "account-one")
+        ProviderChainStore.save(app, ProviderChain(listOf(entry)))
+        ProviderCredentialStore.set(app, entry, "entry-secret")
+        app.getSharedPreferences("ramblr", android.content.Context.MODE_PRIVATE).edit()
+            .putBoolean("use_post_processing", true).apply()
+        cleanupServer.enqueue(MockResponse().setResponseCode(400).setBody(
+            """{"error":{"type":"unsupported_value","code":"unsupported_value","param":"temperature","message":"temperature is unsupported"}}""",
+        ))
+        cleanupServer.enqueue(MockResponse().setBody(
+            JSONObject().put("choices", org.json.JSONArray().put(JSONObject().put("message", JSONObject().put("content", "first cleanup")))).toString(),
+        ))
+
+        runtime.onTap(); runtime.onTap()
+        runtime.handleTranscriptionResult("first raw", token = 1)
+        val firstDeadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < firstDeadline && listener.delivered.isEmpty()) {
+            idleMainLooper(); Thread.sleep(10)
+        }
+        assertEquals(listOf("first cleanup"), listener.delivered.map { it.text })
+        val initial = cleanupServer.takeRequest()
+        val retry = cleanupServer.takeRequest()
+        assertTrue(initial.body.readUtf8().contains("temperature"))
+        assertFalse(retry.body.readUtf8().contains("temperature"))
+        assertEquals("Bearer entry-secret", initial.getHeader("Authorization"))
+        assertEquals(initial.getHeader("Authorization"), retry.getHeader("Authorization"))
+
+        // A fresh runtime/store wrapper reads the durable per-entry negative observation.
+        runtime = DictationRuntime(app, listener, leaseRegistry) { cacheDir, stateMachine ->
+            FakeRecordingEngine(cacheDir, stateMachine)
+        }
+        cleanupServer.enqueue(MockResponse().setBody(
+            JSONObject().put("choices", org.json.JSONArray().put(JSONObject().put("message", JSONObject().put("content", "second cleanup")))).toString(),
+        ))
+        runtime.onTap(); runtime.onTap()
+        runtime.handleTranscriptionResult("second raw", token = 1)
+        val secondDeadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < secondDeadline && listener.delivered.size < 2) {
+            idleMainLooper(); Thread.sleep(10)
+        }
+        assertEquals(listOf("first cleanup", "second cleanup"), listener.delivered.map { it.text })
+        val cached = cleanupServer.takeRequest()
+        assertFalse(cached.body.readUtf8().contains("temperature"))
+        assertEquals("Bearer entry-secret", cached.getHeader("Authorization"))
+        assertEquals(3, cleanupServer.requestCount)
     }
 }

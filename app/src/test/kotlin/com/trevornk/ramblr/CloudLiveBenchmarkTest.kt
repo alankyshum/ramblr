@@ -121,8 +121,6 @@ class CloudLiveBenchmarkTest {
             override fun dispatch(request: RecordedRequest): MockResponse = when {
                 request.path?.contains("/audio/transcriptions") == true ->
                     MockResponse().setBody(JSONObject().put("text", transcript).toString())
-                request.body.readUtf8().contains("Reply OK") ->
-                    MockResponse().setBody("""{"choices":[{"message":{"content":"OK"}}]}""")
                 else -> MockResponse().setBody("""{"choices":[{"message":{"content":"cleanup"}}]}""")
             }
         }

@@ -88,10 +88,10 @@ internal class TemperatureCapabilityStore internal constructor(
         }
 
         fun identity(provider: ProviderKind, endpoint: String, headers: Map<String, String>, model: String,
-                     reasoning: String, options: String, temperature: Double): Identity {
+                     reasoning: String, options: String, temperature: Double, entryId: String = ""): Identity {
             val canonical = JSONArray().put(provider.name).put(endpoint)
                 .put(JSONArray(headers.toSortedMap().map { "${it.key}:${it.value}" }))
-                .put(model).put(reasoning).put(options).put(temperature).toString()
+                .put(model).put(reasoning).put(options).put(temperature).put(entryId).toString()
             return Identity(MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray())
                 .joinToString("") { "%02x".format(it) })
         }

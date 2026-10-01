@@ -251,13 +251,10 @@ explanations, headers, or comments about your edits.
      * the same flat-JSON response shape [parseResponse] expects instead of adding a second
      * SSE-parsing code path.
      */
-    /** [omitTemperature] is an explicit wire-shape option; production capability is learned per
-     * endpoint configuration by [TemperatureCapabilityStore]. */
     fun buildRequestBody(
         text: String,
         prompt: String,
         model: String,
-        omitTemperature: Boolean = false,
     ): JSONObject {
         val messages = JSONArray().apply {
             put(JSONObject().apply {
@@ -273,7 +270,7 @@ explanations, headers, or comments about your edits.
         return JSONObject().apply {
             put("model", model.ifBlank { DEFAULT_MODEL })
             put("messages", messages)
-            if (!omitTemperature) put("temperature", 0.0)
+            put("temperature", 0.0)
             put("stream", false)
         }
     }

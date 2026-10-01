@@ -656,7 +656,7 @@ object CleanupWaterfallExecutor {
                 return
             }
 
-            performStep(steps[index], text, prompt, localPrompt, localVocabulary, credentialLookup, entryCredentialLookup, transport, localInference, localModelPath, cancelHolder, deadlineAtMs, isLastStep = index == steps.lastIndex) { outcome ->
+            performStep(steps[index], text, prompt, localPrompt, localVocabulary, credentialLookup, entryCredentialLookup, transport, localInference, localModelPath, cancelHolder, deadlineAtMs, nowMs, temperatureCacheContext, isLastStep = index == steps.lastIndex) { outcome ->
                 logStepOutcome(steps[index], startedAtMs, outcome, benchmarkContext, benchmarkCorrelationId)
                 when (outcome) {
                     is CleanupStepOutcome.Success -> {
@@ -838,7 +838,7 @@ object CleanupWaterfallExecutor {
             val cache = temperatureCacheContext?.let(TemperatureCapabilityStore::forContext)
             val identity = cache?.let { TemperatureCapabilityStore.identity(ProviderKind.GEMINI,
                 GeminiCleanupProvider.endpointUrl(step.model), GeminiCleanupProvider.headers(apiKey), step.model,
-                "", "", 0.0) }
+                "", "", 0.0, step.entryId) }
             val body = GeminiCleanupProvider.buildRequestBody(text, prompt)
             val omit = cache != null && identity != null && cache.state(identity) == TemperatureCapabilityStore.State.UNSUPPORTED
             if (omit) body.optJSONObject("generationConfig")?.remove("temperature")
@@ -897,7 +897,7 @@ object CleanupWaterfallExecutor {
             TemperatureCapabilityStore.identity(
                 if (step.group == CleanupStepGroup.OMNIROUTE) ProviderKind.OMNIROUTE else ProviderKind.OPENAI,
                 PostProcessor.endpointUrl(baseUrl), mapOf("Authorization" to "Bearer $apiKey"), step.model,
-                "", "stream=false", 0.0,
+                "", "stream=false", 0.0, step.entryId,
             )
         }
         val initialBody = PostProcessor.buildRequestBody(text, prompt, step.model)

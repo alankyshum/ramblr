@@ -187,20 +187,13 @@ class PostProcessorTest {
     }
 
     @Test
-    fun buildRequestBodyOmitsTemperatureWhenRequested() {
-        // #106: GPT-5.6-family reasoning models reject a non-default temperature outright.
-        val body = PostProcessor.buildRequestBody("raw text", "system prompt", "gpt-5.6-terra", omitTemperature = true)
-        assertFalse(body.has("temperature"))
-    }
-
-    @Test
     fun buildRequestBodyDoesNotInferCapabilityFromModelName() {
         val body = PostProcessor.buildRequestBody("raw text", "system prompt", "gpt-5.6-luna")
         assertTrue(body.has("temperature"))
     }
 
     @Test
-    fun buildRequestBodyAutoOmitsTemperatureForGpt6FamilyByDefault() {
+    fun buildRequestBodyKeepsTemperatureIndependentOfModelName() {
         val body = PostProcessor.buildRequestBody("raw text", "system prompt", "gpt-6-luna")
         assertTrue(body.has("temperature"))
         assertEquals("gpt-6-luna", body.getString("model"))
@@ -211,15 +204,21 @@ class PostProcessorTest {
 
     @Test
     fun explicitTemperatureParameterRejectionClassifierIsNarrow() {
-        assertTrue(TemperatureRejectionClassifier.isTemperatureRejection("""{"error":{"param":"temperature","message":"unsupported value"}}"""))
+        assertTrue(TemperatureRejectionClassifier.isTemperatureRejection("""{"error":{"type":"unsupported_value","code":"unsupported_value","param":"temperature","message":"unsupported value"}}"""))
+        assertTrue(TemperatureRejectionClassifier.isTemperatureRejection("""{"error":{"type":"unsupported_parameter","code":"unsupported_parameter","param":"temperature","message":"temperature is not supported"}}"""))
         assertFalse(TemperatureRejectionClassifier.isTemperatureRejection("""{"error":{"param":"model","message":"unsupported model"}}"""))
+        assertFalse(TemperatureRejectionClassifier.isTemperatureRejection("""{"error":{"type":"invalid_request_error","code":"invalid_value","param":"model","message":"temperature is unsupported"}}"""))
+        assertFalse(TemperatureRejectionClassifier.isTemperatureRejection("""{"error":{"type":"invalid_value","code":"invalid_value","param":"temperature","message":"value must be between 0 and 2"}}"""))
+        assertTrue(TemperatureRejectionClassifier.isTemperatureRejection("""{"error":{"code":400,"message":"invalid request","details":[{"fieldViolations":[{"field":"generationConfig.temperature","description":"temperature is not supported"}]}]}}"""))
+        assertFalse(TemperatureRejectionClassifier.isTemperatureRejection("""{"error":{"code":400,"message":"invalid request","details":[{"fieldViolations":[{"field":"generationConfig.topP","description":"temperature unsupported"}]}]}}"""))
+        assertFalse(TemperatureRejectionClassifier.isTemperatureRejection("""{"error":{"code":400,"message":"invalid request","details":[{"fieldViolations":[{"field":"generationConfig.temperatureSuffix","description":"unsupported"}]}]}}"""))
         assertFalse(TemperatureRejectionClassifier.isTemperatureRejection("""{"error":{"param":"temperature","message":"unsupported value"}}""", 403))
     }
 
     @Test
     fun buildRequestBodyIncludesTemperatureByDefaultForBackcompat() {
-        // Every existing call site (CleanupWaterfallExecutor) doesn't pass omitTemperature, so
-        // the default must keep including it -- this is the real production request shape today.
+        // Original requests carry temperature; retry code removes it from a clone only after a
+        // structured rejection.
         val body = PostProcessor.buildRequestBody("raw text", "system prompt", "gpt-5.4-mini")
         assertTrue(body.has("temperature"))
         assertEquals(0.0, body.getDouble("temperature"), 0.0001)

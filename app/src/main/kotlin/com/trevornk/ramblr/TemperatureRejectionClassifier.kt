@@ -10,16 +10,24 @@ internal object TemperatureRejectionClassifier {
             val error = JSONObject(body).optJSONObject("error") ?: return false
             val message = error.optString("message").lowercase()
             val parameter = error.optString("param").lowercase()
+            val type = error.optString("type").lowercase()
+            val code = error.optString("code").lowercase()
             val details = error.optJSONArray("details")
-            val structuredField = details != null && (0 until details.length()).any { i ->
+            val openAi = parameter == "temperature" &&
+                (code == "unsupported_value" || code == "unsupported_parameter" ||
+                    type == "unsupported_value" || type == "unsupported_parameter") &&
+                (message.contains("unsupported") || message.contains("not supported"))
+            val google = details != null && (0 until details.length()).any { i ->
                 val violations = details.optJSONObject(i)?.optJSONArray("fieldViolations") ?: return@any false
                 (0 until violations.length()).any { j ->
-                    violations.optJSONObject(j)?.optString("field")?.lowercase()?.endsWith("temperature") == true
+                    val violation = violations.optJSONObject(j) ?: return@any false
+                    val field = violation.optString("field")
+                    val description = violation.optString("description").lowercase()
+                    field in setOf("generationConfig.temperature", "generation_config.temperature") &&
+                        (description.contains("unsupported") || description.contains("not supported"))
                 }
             }
-            (parameter == "temperature" || structuredField) &&
-                (message.contains("unsupported") || message.contains("does not support") ||
-                    message.contains("not supported") || message.contains("deprecated") || message.contains("invalid value"))
+            openAi || google
         } catch (_: Exception) { false }
     }
 }

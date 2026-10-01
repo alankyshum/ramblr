@@ -99,22 +99,8 @@ object ProviderChainStore {
         return ProviderChain(reordered)
     }
 
-    fun save(context: Context, chain: ProviderChain) = save(context, chain, reconcileTemperature = true)
-
-    internal fun saveWithoutTemperatureProbe(context: Context, chain: ProviderChain) =
-        save(context, chain, reconcileTemperature = false)
-
-    private fun save(context: Context, chain: ProviderChain, reconcileTemperature: Boolean) {
-        val previous = load(context)
+    fun save(context: Context, chain: ProviderChain) {
         prefs(context).edit().putString(KEY_ENTRIES, serialize(chain)).apply()
-        val previousKeys = previous.entries.map { Triple(it.kind, it.model, it.baseUrlOverride) }.toSet()
-        val nextKeys = chain.entries.map { Triple(it.kind, it.model, it.baseUrlOverride) }.toSet()
-        if (reconcileTemperature) {
-            previous.entries.filter { Triple(it.kind, it.model, it.baseUrlOverride) !in nextKeys }
-                .forEach { TemperatureCapabilityProbe.supersede(it.kind) }
-            chain.entries.filter { Triple(it.kind, it.model, it.baseUrlOverride) !in previousKeys }
-                .forEach { TemperatureCapabilityProbe.schedule(context, it.kind) }
-        }
     }
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

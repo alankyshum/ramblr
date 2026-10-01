@@ -6,7 +6,6 @@ import com.trevornk.ramblr.NetworkClients
 import com.trevornk.ramblr.PostProcessor
 import com.trevornk.ramblr.ProviderKind
 import com.trevornk.ramblr.TemperatureRejectionClassifier
-import com.trevornk.ramblr.TemperatureCapabilityStore
 import com.trevornk.ramblr.VocabularyTerms
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
@@ -69,52 +68,44 @@ private enum class Provider(val label: String, val apiKeyEnv: String, val models
     GEMINI("gemini", "GEMINI_API_KEY", "GEMINI_EVAL_MODELS", listOf("gemini-2.5-flash-lite", "gemini-2.5-flash")),
 }
 
-/** Evaluation preflight capability is held only in this process; no user cache or Android state. */
-private val evalTemperatureSupport = java.util.concurrent.ConcurrentHashMap<String, TemperatureCapabilityStore.State>()
+/** Isolated, negative-only runtime observations; never performs a synthetic preflight request. */
+private val evalUnsupportedTemperature = java.util.concurrent.ConcurrentHashMap<String, Long>()
+private const val EVAL_NEGATIVE_TTL_MS = 7L * 24 * 60 * 60 * 1000
 
-private fun openAiRejectsTemperature(apiKey: String, model: String): Boolean {
-    val identity = TemperatureCapabilityStore.identity(
-        ProviderKind.OPENAI, PostProcessor.ENDPOINT_URL,
-        mapOf("Authorization" to "Bearer $apiKey"), model, "", "stream=false", 0.0,
-    )
-    return evalTemperatureSupport.computeIfAbsent(identity.digest) {
-        val probe = PostProcessor.buildRequestBody("Reply OK", "Reply OK", model)
-            .toString().toRequestBody("application/json".toMediaType())
-        val request = Request.Builder().url(PostProcessor.ENDPOINT_URL)
-            .header("Authorization", "Bearer $apiKey").post(probe).build()
-        try {
-            val response = NetworkClients.shared.newBuilder()
-                .callTimeout(7, java.util.concurrent.TimeUnit.SECONDS)
-                .build().newCall(request).execute()
-            val body = response.body?.string().orEmpty()
-            response.close()
-            when {
-                TemperatureRejectionClassifier.isTemperatureRejection(body, response.code) -> TemperatureCapabilityStore.State.UNSUPPORTED
-                response.isSuccessful && !PostProcessor.parseResponse(body).text.isNullOrBlank() -> TemperatureCapabilityStore.State.SUPPORTED
-                else -> TemperatureCapabilityStore.State.UNKNOWN
-            }
-        } catch (_: Exception) { TemperatureCapabilityStore.State.UNKNOWN }
-    } == TemperatureCapabilityStore.State.UNSUPPORTED
+private fun evalTemperatureKey(apiKey: String, model: String): String {
+    val material = "${PostProcessor.ENDPOINT_URL}\u0000$model\u0000$apiKey"
+    return java.security.MessageDigest.getInstance("SHA-256").digest(material.toByteArray())
+        .joinToString("") { "%02x".format(it) }
 }
 
 /** Calls OpenAI's real `/v1/chat/completions`, reusing [PostProcessor]'s request/response shape. */
 private fun callOpenAi(apiKey: String, model: String, prompt: String, text: String): PostProcessor.Result {
-    val body = PostProcessor.buildRequestBody(text, prompt, model, omitTemperature = openAiRejectsTemperature(apiKey, model))
-        .toString().toRequestBody("application/json".toMediaType())
-    val request = Request.Builder()
-        .url(PostProcessor.ENDPOINT_URL)
-        .header("Authorization", "Bearer $apiKey")
-        .post(body)
-        .build()
-
     return try {
-        NetworkClients.shared.newCall(request).execute().use { response ->
-            val responseBody = response.body?.string() ?: ""
-            if (!response.isSuccessful && responseBody.isBlank()) {
-                PostProcessor.Result(null, "HTTP ${response.code}")
-            } else {
-                PostProcessor.parseResponse(responseBody)
+        val key = evalTemperatureKey(apiKey, model)
+        val now = System.currentTimeMillis()
+        evalUnsupportedTemperature.entries.removeIf { now - it.value >= EVAL_NEGATIVE_TTL_MS || now < it.value }
+        val knownUnsupported = evalUnsupportedTemperature.containsKey(key)
+        val original = PostProcessor.buildRequestBody(text, prompt, model)
+        if (knownUnsupported) original.remove("temperature")
+        fun request(body: JSONObject) = Request.Builder().url(PostProcessor.ENDPOINT_URL)
+            .header("Authorization", "Bearer $apiKey")
+            .post(body.toString().toRequestBody("application/json".toMediaType())).build()
+        var response = NetworkClients.shared.newCall(request(original)).execute()
+        var responseBody = response.body?.string().orEmpty()
+        if (!knownUnsupported && TemperatureRejectionClassifier.isTemperatureRejection(responseBody, response.code)) {
+            response.close()
+            evalUnsupportedTemperature[key] = System.currentTimeMillis()
+            while (evalUnsupportedTemperature.size > 128) {
+                val oldest = evalUnsupportedTemperature.minByOrNull { it.value } ?: break
+                evalUnsupportedTemperature.remove(oldest.key, oldest.value)
             }
+            val retry = JSONObject(original.toString()).apply { remove("temperature") }
+            response = NetworkClients.shared.newCall(request(retry)).execute()
+            responseBody = response.body?.string().orEmpty()
+        }
+        response.use {
+            if (!it.isSuccessful && responseBody.isBlank()) PostProcessor.Result(null, "HTTP ${it.code}")
+            else PostProcessor.parseResponse(responseBody)
         }
     } catch (e: IOException) {
         PostProcessor.Result(null, e.message ?: "network error")

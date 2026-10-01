@@ -1002,8 +1002,6 @@ class DictationRuntimeTest {
             override fun dispatch(request: RecordedRequest): MockResponse = when {
                 request.path?.contains("/audio/transcriptions") == true ->
                     MockResponse().setBody(JSONObject().put("text", transcript).toString())
-                request.body.readUtf8().contains("Reply OK") ->
-                    MockResponse().setBody("""{"choices":[{"message":{"content":"OK"}}]}""")
                 else -> MockResponse().setBody("""{"choices":[{"message":{"content":"cleanup"}}]}""")
             }
         }
@@ -1018,36 +1016,6 @@ class DictationRuntimeTest {
             idleMainLooper(); Thread.sleep(10)
         }
         assertEquals(RecordingStateMachine.State.IDLE, runtime.currentState())
-    }
-
-    @Test
-    fun `saving a cloud config sends only a synthetic probe and persists its capability digest`() {
-        batchServer.enqueue(MockResponse().setBody("""{"choices":[{"message":{"content":"OK"}}]}"""))
-        val base = batchServer.url("/v1").toString().trimEnd('/')
-        val key = "probe-test-secret"
-        val chain = ProviderChain(listOf(ProviderChainEntry(ProviderKind.OPENAI, "probe-model", baseUrlOverride = base)))
-        ProviderChainStore.save(app, chain)
-        ProviderCredentialStore.set(app, ProviderKind.OPENAI, key)
-        shadowOf(Looper.getMainLooper()).idleFor(101, TimeUnit.MILLISECONDS)
-
-        val request = batchServer.takeRequest(5, TimeUnit.SECONDS)
-            ?: throw AssertionError("save-time probe was not sent")
-        val requestBody = request.body.readUtf8()
-        assertTrue(requestBody.contains("Reply OK"))
-        assertFalse(requestBody.contains("transcript"))
-        val identity = TemperatureCapabilityStore.identity(
-            ProviderKind.OPENAI, PostProcessor.endpointUrl(base), mapOf("Authorization" to "Bearer $key"),
-            "probe-model", "", "stream=false", 0.0,
-        )
-        val store = TemperatureCapabilityStore.forContext(app)
-        val deadline = System.currentTimeMillis() + 2_000
-        while (System.currentTimeMillis() < deadline && store.state(identity) == TemperatureCapabilityStore.State.UNKNOWN) Thread.sleep(10)
-        assertEquals(TemperatureCapabilityStore.State.SUPPORTED, store.state(identity))
-        val persisted = app.getSharedPreferences("ramblr", android.content.Context.MODE_PRIVATE)
-            .getString("temperature_capabilities", "").orEmpty()
-        assertFalse(persisted.contains(key))
-        assertFalse(persisted.contains("Reply OK"))
-        assertFalse(persisted.contains(base))
     }
 
     private class FakeCloudLiveFactory : CloudLiveTranscriptionSessionFactory {

@@ -30,9 +30,14 @@ class TemperatureCapabilityStoreTest {
         assertNotEquals(base, TemperatureCapabilityStore.identity(ProviderKind.OPENAI, "https://host/a", mapOf("Authorization" to "Bearer a"), "m", "r", "o2", 0.0))
         assertNotEquals(base, TemperatureCapabilityStore.identity(ProviderKind.OPENAI, "https://host/a", mapOf("Authorization" to "Bearer a"), "m", "r", "o", 1.0))
         assertNotEquals(base, TemperatureCapabilityStore.identity(ProviderKind.OMNIROUTE, "https://host/a", mapOf("Authorization" to "Bearer a"), "m", "r", "o", 0.0))
+        assertNotEquals(base, TemperatureCapabilityStore.identity(ProviderKind.OPENAI, "https://host/a", mapOf("Authorization" to "Bearer a"), "m", "r", "o", 0.0, "entry-a"))
+        assertNotEquals(
+            TemperatureCapabilityStore.identity(ProviderKind.OPENAI, "https://host/a", mapOf("Authorization" to "Bearer a"), "m", "r", "o", 0.0, "entry-a"),
+            TemperatureCapabilityStore.identity(ProviderKind.OPENAI, "https://host/a", mapOf("Authorization" to "Bearer a"), "m", "r", "o", 0.0, "entry-b"),
+        )
     }
 
-    @Test fun staleProbeCannotOverwriteNegativeRuntimeEvidence() {
+    @Test fun staleObservationCannotOverwriteNegativeRuntimeEvidence() {
         var now = 10_000L
         var persisted: String? = null
         val store = TemperatureCapabilityStore({ persisted }, { persisted = it }, { now })
@@ -55,29 +60,29 @@ class TemperatureCapabilityStoreTest {
         assertEquals(TemperatureCapabilityStore.State.SUPPORTED, store.state(id))
     }
 
-    @Test fun olderProbeRejectionCannotOverwriteNewerRuntimeSuccessAtSameClockTime() {
+    @Test fun olderObservationRejectionCannotOverwriteNewerRuntimeSuccessAtSameClockTime() {
         var now = 20_000L
         var persisted: String? = null
-        val probeStore = TemperatureCapabilityStore({ persisted }, { persisted = it }, { now })
+        val olderStore = TemperatureCapabilityStore({ persisted }, { persisted = it }, { now })
         val runtimeStore = TemperatureCapabilityStore({ persisted }, { persisted = it }, { now })
         val id = TemperatureCapabilityStore.Identity("same-config")
-        val olderProbe = probeStore.beginObservation(id)
+        val olderObservation = olderStore.beginObservation(id)
         val newerRuntime = runtimeStore.beginObservation(id)
         runtimeStore.record(id, TemperatureCapabilityStore.State.SUPPORTED, newerRuntime)
-        probeStore.record(id, TemperatureCapabilityStore.State.UNSUPPORTED, olderProbe)
+        olderStore.record(id, TemperatureCapabilityStore.State.UNSUPPORTED, olderObservation)
         assertEquals(TemperatureCapabilityStore.State.SUPPORTED, runtimeStore.state(id))
     }
 
-    @Test fun olderProbeSuccessCannotOverwriteNewerRuntimeRejectionAtSameClockTime() {
+    @Test fun olderObservationSuccessCannotOverwriteNewerRuntimeRejectionAtSameClockTime() {
         val now = 20_000L
         var persisted: String? = null
-        val probeStore = TemperatureCapabilityStore({ persisted }, { persisted = it }, { now })
+        val olderStore = TemperatureCapabilityStore({ persisted }, { persisted = it }, { now })
         val runtimeStore = TemperatureCapabilityStore({ persisted }, { persisted = it }, { now })
         val id = TemperatureCapabilityStore.Identity("same-config")
-        val olderProbe = probeStore.beginObservation(id)
+        val olderObservation = olderStore.beginObservation(id)
         val newerRuntime = runtimeStore.beginObservation(id)
         runtimeStore.record(id, TemperatureCapabilityStore.State.UNSUPPORTED, newerRuntime)
-        probeStore.record(id, TemperatureCapabilityStore.State.SUPPORTED, olderProbe)
+        olderStore.record(id, TemperatureCapabilityStore.State.SUPPORTED, olderObservation)
         assertEquals(TemperatureCapabilityStore.State.UNSUPPORTED, runtimeStore.state(id))
     }
 
