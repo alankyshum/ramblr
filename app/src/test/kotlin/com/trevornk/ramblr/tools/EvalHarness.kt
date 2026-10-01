@@ -84,7 +84,7 @@ private fun callOpenAi(apiKey: String, model: String, prompt: String, text: Stri
         val key = evalTemperatureKey(apiKey, model)
         val now = System.currentTimeMillis()
         evalUnsupportedTemperature.entries.removeIf { now - it.value >= EVAL_NEGATIVE_TTL_MS || now < it.value }
-        val knownUnsupported = evalUnsupportedTemperature.containsKey(key)
+        val knownUnsupported = PostProcessor.rejectsTemperature(model) || evalUnsupportedTemperature.containsKey(key)
         val original = PostProcessor.buildRequestBody(text, prompt, model)
         if (knownUnsupported) original.remove("temperature")
         fun request(body: JSONObject) = Request.Builder().url(PostProcessor.ENDPOINT_URL)

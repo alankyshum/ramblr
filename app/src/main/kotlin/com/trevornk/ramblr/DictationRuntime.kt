@@ -1747,9 +1747,6 @@ class DictationRuntime internal constructor(
                 }
             }
 
-                    }
-                }
-            }
         } else {
             handler.post {
                 if (!guard.isCurrent(token)) return@post

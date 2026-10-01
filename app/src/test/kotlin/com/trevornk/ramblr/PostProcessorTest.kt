@@ -187,13 +187,17 @@ class PostProcessorTest {
     }
 
     @Test
-    fun buildRequestBodyDoesNotInferCapabilityFromModelName() {
+    fun buildRequestBodySeedsKnownRejectingModelFamilies() {
         val body = PostProcessor.buildRequestBody("raw text", "system prompt", "gpt-5.6-luna")
-        assertTrue(body.has("temperature"))
+        assertFalse(body.has("temperature"))
+        assertFalse(PostProcessor.buildRequestBody("raw text", "system prompt", "o1-mini").has("temperature"))
+        assertFalse(PostProcessor.buildRequestBody("raw text", "system prompt", "o3").has("temperature"))
+        assertFalse(PostProcessor.buildRequestBody("raw text", "system prompt", "o4-mini").has("temperature"))
+        assertTrue(PostProcessor.buildRequestBody("raw text", "system prompt", "gpt-6-luna").has("temperature"))
     }
 
     @Test
-    fun buildRequestBodyKeepsTemperatureIndependentOfModelName() {
+    fun buildRequestBodyKeepsTemperatureForUnknownModels() {
         val body = PostProcessor.buildRequestBody("raw text", "system prompt", "gpt-6-luna")
         assertTrue(body.has("temperature"))
         assertEquals("gpt-6-luna", body.getString("model"))

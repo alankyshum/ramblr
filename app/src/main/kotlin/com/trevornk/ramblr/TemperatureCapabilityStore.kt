@@ -48,6 +48,9 @@ internal class TemperatureCapabilityStore internal constructor(
         val negativeIsFresh = timestamp > 0 && timestamp <= now() && age < TTL_MS
         if (existing?.optString("state") == State.UNSUPPORTED.name && state == State.SUPPORTED && negativeIsFresh)
             return@synchronized
+        val positiveIsFresh = timestamp > 0 && timestamp <= now() && age < TTL_MS / 2
+        if (existing?.optString("state") == State.SUPPORTED.name && state == State.SUPPORTED && positiveIsFresh)
+            return@synchronized
         val updated = JSONArray()
         (0 until entries.length()).mapNotNull { entries.optJSONObject(it) }
             .filterNot { it.optString("key") == identity.digest }.forEach(updated::put)

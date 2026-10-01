@@ -7,6 +7,22 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TemperatureCapabilityStoreTest {
+    @Test fun repeatedSupportedEvidenceSkipsWritesUntilHalfTtl() {
+        var now = 1_000L
+        var persisted: String? = null
+        var writes = 0
+        val store = TemperatureCapabilityStore({ persisted }, { persisted = it; writes++ }, { now })
+        val id = TemperatureCapabilityStore.Identity("positive")
+        store.record(id, TemperatureCapabilityStore.State.SUPPORTED)
+        assertEquals(1, writes)
+        now += 7L * 24 * 60 * 60 * 1000 / 2 - 1
+        store.record(id, TemperatureCapabilityStore.State.SUPPORTED)
+        assertEquals(1, writes)
+        now++
+        store.record(id, TemperatureCapabilityStore.State.SUPPORTED)
+        assertEquals(2, writes)
+    }
+
     @Test fun persistsStateAndExpiresAtSevenDays() {
         var now = 1_000L
         var persisted: String? = null

@@ -14,6 +14,12 @@ object PostProcessor {
     // untested against Ramblr's actual cleanup prompts, so not swapped in blind (2026-07-10).
     const val DEFAULT_MODEL = "gpt-5.4-mini"
 
+    private val TEMPERATURE_REJECTING_MODEL_PREFIXES = listOf("o1", "o3", "o4", "gpt-5.6")
+
+    /** Known model families that reject non-default temperature; runtime learning covers unknowns. */
+    fun rejectsTemperature(model: String): Boolean =
+        TEMPERATURE_REJECTING_MODEL_PREFIXES.any { model.startsWith(it) }
+
     val ENDPOINT_URL = "$DEFAULT_BASE_URL/chat/completions"
 
     /** Host cleanup requests are actually sent to by default, for use in UI copy. See #23. */
@@ -255,6 +261,7 @@ explanations, headers, or comments about your edits.
         text: String,
         prompt: String,
         model: String,
+        omitTemperature: Boolean = rejectsTemperature(model.ifBlank { DEFAULT_MODEL }),
     ): JSONObject {
         val messages = JSONArray().apply {
             put(JSONObject().apply {
@@ -270,7 +277,7 @@ explanations, headers, or comments about your edits.
         return JSONObject().apply {
             put("model", model.ifBlank { DEFAULT_MODEL })
             put("messages", messages)
-            put("temperature", 0.0)
+            if (!omitTemperature) put("temperature", 0.0)
             put("stream", false)
         }
     }

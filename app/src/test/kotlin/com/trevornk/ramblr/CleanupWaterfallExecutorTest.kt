@@ -217,6 +217,22 @@ class CleanupWaterfallExecutorTest {
         assertEquals("cleaned", final?.text)
     }
 
+    @Test fun `known rejecting model family is sent without temperature without a rejection round trip`() {
+        var requestCount = 0
+        var firstBody = ""
+        val transport = CleanupHttpTransport { _, _, jsonBody, _, _, callback ->
+            requestCount++
+            firstBody = jsonBody
+            callback(CleanupHttpOutcome.Ok("""{"choices":[{"message":{"content":"cleaned"}}]}"""))
+        }
+        execute(
+            waterfall = CleanupWaterfall(listOf(CleanupStep(CleanupStepGroup.OPENAI_DIRECT, "o3-mini"))),
+            transport = transport,
+        )
+        assertEquals(1, requestCount)
+        assertFalse(org.json.JSONObject(firstBody).has("temperature"))
+    }
+
     @Test fun `expired temperature retry deadline does not send another request`() {
         var now = 100L
         var requests = 0
